@@ -1,7 +1,7 @@
 {
   "name": "pglint",
   "displayName": "pglint",
-  "description": "",
+  "description": "PostgreSQL schema SQL Linter and Checker",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.97.0"
@@ -9,7 +9,10 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:sql",
+    "onLanguage:postgres"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -33,17 +36,21 @@
     "lint": "eslint src",
     "test": "vscode-test"
   },
+  "dependencies": {
+    "pg": "^8.13.3"
+  },
   "devDependencies": {
-    "@types/vscode": "^1.97.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
+    "@types/pg": "^8.11.11",
+    "@types/vscode": "^1.97.0",
     "@typescript-eslint/eslint-plugin": "^8.3.0",
     "@typescript-eslint/parser": "^8.3.0",
-    "eslint": "^9.9.1",
-    "esbuild": "^0.23.1",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.5.4",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "esbuild": "^0.23.1",
+    "eslint": "^9.9.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.5.4"
   }
 }
