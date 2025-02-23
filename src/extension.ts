@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
-import { Client } from 'pg'
+import { Client, ClientConfig } from 'pg'
 
 let channel!: vscode.OutputChannel
+const languageIds = ['sql', 'postgres']
 
 interface Statement {
 	sql: string
@@ -151,9 +152,11 @@ export function splitSqlWithPositions(sql: string): Statement[] {
 }
 
 async function lintDocument(document: vscode.TextDocument, collection: vscode.DiagnosticCollection) {
-	const config = vscode.workspace.getConfiguration('pglint')
+	if (!languageIds.includes(document.languageId)) {
+		return
+	}
 
-	channel.appendLine(`LANGUAGE ID: ${document.languageId}`)
+	const config = vscode.workspace.getConfiguration('pglint')
 
 	collection.delete(document.uri)
 	const sqlText = document.getText()
@@ -161,33 +164,38 @@ async function lintDocument(document: vscode.TextDocument, collection: vscode.Di
 
 	const statements = splitSqlWithPositions(sqlText)
 
-	const connectionConfig = {
-		host: config.get('host', 'localhost'),
-		port: config.get('port', 5432),
-		user: config.get('user', 'postgres'),
-		password: config.get('password', ''),
-		database: 'postgres'
-	}
+	const connectionString = config.get('pglint.databaseUrl', 'postgres://postgres@localhost')
+	const postgresConfig: ClientConfig = { connectionString }
+	let tempDbConfig: ClientConfig
 
-	const tempDbName = `vscode_pg_lint_${Date.now()}`
+	const database = `vscode_pglint_${Date.now()}`
 
 	try {
-		const client = new Client(connectionConfig)
+		const client = new Client(postgresConfig)
+
 		channel.appendLine('Connecting to database...')
 		await client.connect()
-		channel.appendLine(`Creating temporary database: ${tempDbName}`)
-		await client.query(`CREATE DATABASE ${tempDbName}`)
+		channel.appendLine(`Creating temporary database: ${database}`)
+		await client.query(`CREATE DATABASE ${database}`)
+		tempDbConfig = {
+			host: client.host,
+			port: client.port,
+			user: client.user,
+			password: client.password,
+			database
+		}
+		channel.appendLine(`tempDbConfig: ${JSON.stringify(tempDbConfig)}`)
 	} catch (error: any) {
-		channel.appendLine(`ERROR: Failed to create temporary database: ${JSON.stringify(error)}`)
+		channel.appendLine(`ERROR: Failed to create temporary database: ${database}: ${JSON.stringify(error)}`)
 		// TODO: display error
 		return
 	}
 
 	let client: Client
 	try {
-		client = new Client({ ...connectionConfig, database: tempDbName })
+		client = new Client(tempDbConfig)
 		await client.connect()
-		channel.appendLine(`Connected to temporary database: ${tempDbName}`)
+		channel.appendLine(`Connected to database: ${client.database}`)
 	} catch (error: any) {
 		channel.appendLine(`ERROR: Failed to connect to temporary database: ${JSON.stringify(error)}`)
 		// TODO: display error
@@ -197,12 +205,12 @@ async function lintDocument(document: vscode.TextDocument, collection: vscode.Di
 	let statement!: Statement
 
 	try {
-
-		for (var i = 0; i < statements.length; i++) {
+		const length = statements.length
+		for (var i = 0; i < length; i++) {
+			channel.appendLine(`-- Running statement ${i + 1} of ${length}`)
 			statement = statements[i]
 			await client.query(statement.sql)
 		}
-
 	} catch (err: any) {
 		const { ...error } = err
 		// position is 1-based
@@ -211,73 +219,17 @@ async function lintDocument(document: vscode.TextDocument, collection: vscode.Di
 		if (hint) {
 			message += ` Hint: ${hint}`
 		}
-		const position = error.position ? parseInt(error.position) - 1 : null
+		const offset = error.position ? parseInt(error.position) - 1 : null
 		channel.appendLine(`ERROR: ${message} - ${JSON.stringify(error)}`)
 
 		const { sql, start, end } = statement
 		const statementRange = new vscode.Range(document.positionAt(start), document.positionAt(end))
 		let statementDiagnostic = new vscode.Diagnostic(statementRange, message, vscode.DiagnosticSeverity.Error)
-		const quoted = message.match(/\"([^"]+)\"/)
-		if (quoted) {
-			if (position && position < sql.length - quoted[1].length) {
 
-				const errorStart = start + position
-				const errorEnd = errorStart + quoted[1].length
-				// channel.appendLine(`position: ${position}, len: ${sql.length}, errorStart: ${errorStart} - errorEnd: ${errorEnd}`)
-
-				const errorRange = new vscode.Range(
-					document.positionAt(errorStart),
-					document.positionAt(errorEnd)
-				)
-				const errorDiagnostic = new vscode.Diagnostic(
-					errorRange,
-					message,
-					vscode.DiagnosticSeverity.Error
-				)
-				diagnostics.push(errorDiagnostic)
-				statementDiagnostic.severity = vscode.DiagnosticSeverity.Warning
-				statementDiagnostic.message = `In this statement: ${message}`
-
-			} else {
-
-				const pattern = quoted[1].match(/^[^a-zA-Z0-9]+$/)
-					? new RegExp(quoted[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')  // Special chars
-					: new RegExp(`\\b${quoted[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')  // Words
-
-				const quotedMatches = Array.from(sql.matchAll(pattern))
-
-				if (quotedMatches.length > 0) {
-					// channel.appendLine(`matches found: ${quotedMatches.length}`)
-					statementDiagnostic.severity = vscode.DiagnosticSeverity.Warning
-					statementDiagnostic.message = `In this statement: ${message}`
-
-					// Create diagnostic for each match
-					for (const match of quotedMatches) {
-						const errorStart = start + match.index
-						const errorEnd = errorStart + quoted[1].length
-						const errorRange = new vscode.Range(
-							document.positionAt(errorStart),
-							document.positionAt(errorEnd)
-						)
-						const errorDiagnostic = new vscode.Diagnostic(
-							errorRange,
-							message,
-							vscode.DiagnosticSeverity.Error
-						)
-						diagnostics.push(errorDiagnostic)
-					}
-				}
-			}
-		} else if (position) {
-			const word = sql.substring(position).match(/\b|$/)
-			const length = word?.index ?? sql.length - position
-
-			const errorStart = start + position
-			const errorEnd = errorStart + length
-
+		const pushDiagnostic = ({ offset, length }: { offset: number, length: number }) => {
 			const errorRange = new vscode.Range(
-				document.positionAt(errorStart),
-				document.positionAt(errorEnd)
+				document.positionAt(start + offset),
+				document.positionAt(start + offset + length)
 			)
 			const errorDiagnostic = new vscode.Diagnostic(
 				errorRange,
@@ -287,26 +239,47 @@ async function lintDocument(document: vscode.TextDocument, collection: vscode.Di
 			diagnostics.push(errorDiagnostic)
 			statementDiagnostic.severity = vscode.DiagnosticSeverity.Warning
 			statementDiagnostic.message = `In this statement: ${message}`
+		}
 
+		const quoted = message.match(/\"([^"]+)\"/)
+		if (quoted) {
+			const length = quoted[1].length
+			if (offset && offset < sql.length - quoted[1].length) {
+				pushDiagnostic({ offset, length })
+			} else {
+				const pattern = quoted[1].match(/^[^a-zA-Z0-9]+$/)
+					? new RegExp(quoted[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')  // Special chars
+					: new RegExp(`\\b${quoted[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')  // Words
+
+				const quotedMatches = Array.from(sql.matchAll(pattern))
+
+				if (quotedMatches.length > 0) {
+					// Create diagnostic for each match
+					for (const match of quotedMatches) {
+						const offset = match.index
+						pushDiagnostic({ offset, length })
+					}
+				}
+			}
+		} else if (offset && offset < sql.length - 1) {
+			const word = sql.substring(offset).match(/\b|$/)
+			const length = word?.index ?? sql.length - offset
+			pushDiagnostic({ offset, length })
 		}
 		diagnostics.push(statementDiagnostic)
 
-		// if (end + 1 < sqlText.length) {
 		const unreachableRange = new vscode.Range(document.positionAt(end + 1), document.positionAt(sqlText.length))
 		const unreachableDiagnostic = new vscode.Diagnostic(unreachableRange, "Untested statements", vscode.DiagnosticSeverity.Hint)
 		unreachableDiagnostic.tags = [vscode.DiagnosticTag.Unnecessary]
 		diagnostics.push(unreachableDiagnostic)
-		// channel.appendLine(`added unreachable range: ${JSON.stringify(unreachableRange)}`)
-		// }
-		// channel.appendLine(`ERROR running query:\n${JSON.stringify(error)}\nquery: ${statement.sql}\n${JSON.stringify(statement)}`)
 		collection.set(document.uri, diagnostics)
 	} finally {
 		try {
 			await client.end()
-			const cleanupClient = new Client(connectionConfig)
+			const cleanupClient = new Client(postgresConfig)
 			await cleanupClient.connect()
 			channel.appendLine('Running cleanup...')
-			await cleanupClient.query(`DROP DATABASE IF EXISTS ${tempDbName}`)
+			await cleanupClient.query(`DROP DATABASE IF EXISTS ${database}`)
 			await cleanupClient.end()
 			channel.appendLine('Cleanup completed')
 		} catch (error: any) {
@@ -315,28 +288,23 @@ async function lintDocument(document: vscode.TextDocument, collection: vscode.Di
 	}
 }
 
-
 export function activate(context: vscode.ExtensionContext) {
 	channel = vscode.window.createOutputChannel("PG Lint")
 
 	const diagnosticCollection = vscode.languages.createDiagnosticCollection('pglint')
 	context.subscriptions.push(diagnosticCollection)
 
-	// const commandSubscription = vscode.commands.registerCommand('pglint.runLint', async () => {
-	// 	const editor = vscode.window.activeTextEditor
-	// 	if (!editor) {
-	// 		channel.appendLine('No active editor')
-	// 		return
-	// 	}
-	// 	channel.appendLine(`Linting document with language ID: ${editor.document.languageId}`)
-	// 	await lintDocument(editor.document, diagnosticCollection)
-	// })
-	// context.subscriptions.push(commandSubscription)
+	context.subscriptions.push(vscode.commands.registerCommand('pglint.lint', async () => {
+		const editor = vscode.window.activeTextEditor
+		if (editor && languageIds.includes(editor.document.languageId)) {
+			await lintDocument(editor.document, diagnosticCollection)
+		}
+	}))
 
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
-		// Clear old diagnostics
-		diagnosticCollection.delete(document.uri)
-		lintDocument(document, diagnosticCollection)
+		if (languageIds.includes(document.languageId)) {
+			await lintDocument(document, diagnosticCollection)
+		}
 	}))
 }
 

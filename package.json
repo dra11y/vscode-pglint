@@ -17,10 +17,25 @@
   "contributes": {
     "commands": [
       {
-        "command": "pglint.helloWorld",
-        "title": "Hello World"
+        "command": "pglint.lint",
+        "title": "Lint PostgreSQL Schema"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "PostgreSQL Lint",
+      "properties": {
+        "pglint.databaseUrl": {
+          "type": "string",
+          "default": "postgres://postgres@localhost",
+          "description": "PostgreSQL Server URL on which to create temporary databases for linting"
+        },
+        "pglint.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically lint Postgres SQL files on save"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
