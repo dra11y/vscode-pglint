@@ -125,10 +125,10 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
     const channel = getChannel()
     channel.clear()
 
-    // collection.clear()
+    collection.clear()
     const sqlText = document.getText()
 
-    const statements = await splitSqlWithPositions(sqlText)
+    const statements = await splitSqlWithPositions(document.uri, sqlText)
     const postgresConfig: ClientConfig = { connectionString }
     let tempDbConfig: ClientConfig
 

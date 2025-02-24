@@ -1,35 +1,49 @@
-import { readFile } from 'fs/promises'
+import * as vscode from 'vscode'
+import * as fs from 'fs/promises'
+import * as path from 'path'
 
 export interface Statement {
+    uri: vscode.Uri
     sql?: string
     error?: string
     start: number
     end: number
 }
 
-interface IncludeResult {
-    includeSql?: string
-    error?: string
+interface IncludeSql {
+    includeUri: vscode.Uri
+    includeSql: string
 }
 
 const INCLUDE_PREFIX: string = '@include:'
 
-async function tryInclude(comment: string): Promise<IncludeResult> {
-    const path = comment.replace(INCLUDE_PREFIX, '').trim()
-    try {
-        const file = await readFile(path)
-        const includeSql = file.toString()
-        return {
-            includeSql,
-        }
-    } catch (e: any) {
-        return {
-            error: e.message ?? e.toString()
-        }
+/// `directive` is the string **after** the `INCLUDE_PREFIX` is removed.
+/// throws
+async function tryInclude(directive: string, uri: vscode.Uri): Promise<IncludeSql> {
+    if (!directive) {
+        throw new Error('include directive must be a non-empty string')
+    }
+    // Normalize the directive path to handle any path format issues
+    // This resolves '.', removes redundant separators, etc.
+    const normalizedDirective = path.normalize(directive)
+    // Get the parent directory of the current uri
+    const dirPath = path.dirname(uri.fsPath)
+    // Resolve the directive relative to the directory
+    const resolvedPath = path.join(dirPath, normalizedDirective)
+    const stat = await fs.stat(resolvedPath)
+    if (!stat.isFile()) {
+        throw new Error(`include path is not a file: ${resolvedPath}`)
+    }
+    const includeUri = vscode.Uri.file(resolvedPath)
+    const file = await fs.readFile(resolvedPath)
+    const includeSql = file.toString()
+    return {
+        includeSql,
+        includeUri
     }
 }
 
-export async function splitSqlWithPositions(sql: string): Promise<Statement[]> {
+export async function splitSqlWithPositions(uri: vscode.Uri, sql: string): Promise<Statement[]> {
     const statements: Statement[] = []
     let currentStart = 0
     let currentText = ''
@@ -43,6 +57,7 @@ export async function splitSqlWithPositions(sql: string): Promise<Statement[]> {
     const pushStatement = (endPos: number) => {
         if (currentText.trim()) {
             statements.push({
+                uri,
                 sql: currentText,
                 start: currentStart,
                 end: endPos
@@ -102,17 +117,22 @@ export async function splitSqlWithPositions(sql: string): Promise<Statement[]> {
                     pos++
                 }
                 const commentText = sql.substring(pos, newline).trim()
-                if (commentText.startsWith(INCLUDE_PREFIX)) {
-                    const { includeSql, error } = await tryInclude(commentText)
-                    if (includeSql) {
-                        statements.push(...await splitSqlWithPositions(includeSql))
-                    } else {
-                        statements.push({
-                            start: pos,
-                            end: pos + commentText.length,
-                            error: error ?? 'invalid include directive'
-                        })
-                    }
+                if (!commentText.startsWith(INCLUDE_PREFIX)) {
+                    continue
+                }
+
+                const directive = commentText.replace(INCLUDE_PREFIX, '')
+                try {
+                    const { includeUri, includeSql } = await tryInclude(directive, uri)
+                    statements.push(...await splitSqlWithPositions(includeUri, includeSql))
+
+                } catch (e: any) {
+                    statements.push({
+                        uri,
+                        error: e.message ?? 'invalid include directive',
+                        start: pos,
+                        end: pos + commentText.length
+                    })
                 }
             }
             continue
@@ -178,6 +198,7 @@ export async function splitSqlWithPositions(sql: string): Promise<Statement[]> {
     // Add final statement
     if (currentText.trim()) {
         statements.push({
+            uri,
             sql: currentText,
             start: currentStart,
             end: pos - 1
