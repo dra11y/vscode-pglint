@@ -1,10 +1,35 @@
+import { readFile } from 'fs/promises'
+
 export interface Statement {
-    sql: string
+    sql?: string
+    error?: string
     start: number
     end: number
 }
 
-export function splitSqlWithPositions(sql: string): Statement[] {
+interface IncludeResult {
+    includeSql?: string
+    error?: string
+}
+
+const INCLUDE_PREFIX: string = '@include:'
+
+async function tryInclude(comment: string): Promise<IncludeResult> {
+    const path = comment.replace(INCLUDE_PREFIX, '').trim()
+    try {
+        const file = await readFile(path)
+        const includeSql = file.toString()
+        return {
+            includeSql,
+        }
+    } catch (e: any) {
+        return {
+            error: e.message ?? e.toString()
+        }
+    }
+}
+
+export async function splitSqlWithPositions(sql: string): Promise<Statement[]> {
     const statements: Statement[] = []
     let currentStart = 0
     let currentText = ''
@@ -71,6 +96,25 @@ export function splitSqlWithPositions(sql: string): Statement[] {
             isLineComment = true
             isStatement = false
             pos += 2
+            const newline = sql.indexOf('\n', pos)
+            if (newline > -1) {
+                while (/[\s\r\n]/.test(sql[pos])) {
+                    pos++
+                }
+                const commentText = sql.substring(pos, newline).trim()
+                if (commentText.startsWith(INCLUDE_PREFIX)) {
+                    const { includeSql, error } = await tryInclude(commentText)
+                    if (includeSql) {
+                        statements.push(...await splitSqlWithPositions(includeSql))
+                    } else {
+                        statements.push({
+                            start: pos,
+                            end: pos + commentText.length,
+                            error: error ?? 'invalid include directive'
+                        })
+                    }
+                }
+            }
             continue
         }
 
