@@ -1,13 +1,23 @@
 {
   "name": "pglint",
   "displayName": "pglint",
+  "icon": "pglint-icon.png",
   "description": "PostgreSQL schema SQL Linter and Checker",
+  "publisher": "dra11y",
+  "author": {
+    "name": "Tom Grushka",
+    "url": "https://github.com/dra11y"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dra11y/vscode-pglint.git"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.97.0"
   },
   "categories": [
-    "Other"
+    "Linters"
   ],
   "activationEvents": [
     "onLanguage:sql",
@@ -18,21 +28,33 @@
     "commands": [
       {
         "command": "pglint.lint",
-        "title": "Lint PostgreSQL Schema"
+        "title": "pglint: Lint PostgreSQL Schema"
       }
     ],
     "configuration": {
       "title": "PostgreSQL Lint",
       "properties": {
+        "pglint.languageIds": {
+          "type": "array",
+          "description": "Language IDs of PostgreSQL schemas to lint.",
+          "default": [
+            "sql",
+            "postgres"
+          ]
+        },
         "pglint.databaseUrl": {
           "type": "string",
-          "default": "postgres://postgres@localhost",
-          "description": "PostgreSQL Server URL on which to create temporary databases for linting"
+          "description": "PostgreSQL Server URL on which to create temporary databases for linting."
         },
         "pglint.lintOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically lint Postgres SQL files on save"
+          "description": "Automatically lint Postgres SQL files on save."
+        },
+        "pglint.clearOnChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Clear diagnostics when the document is changed."
         }
       }
     }

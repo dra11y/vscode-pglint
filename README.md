@@ -1,8 +1,25 @@
-# pglint README
+# pglint: PostgreSQL Schema Lint for VS Code
 
-This is the README for your extension "pglint". After writing up a brief description, we recommend including the following sections.
+I tried other PostgreSQL extensions, and none of them were able to lint a `.sql` schema file against a live PostgreSQL server and highlight the first error where it occurs in the schema, so I wrote this one.
 
 ## Features
+
+Lints a PostgreSQL `.sql` schema file (with language ID `sql` or `postgres`) and highlights the erroneous statement and, in most cases, the actual keyword of the error.
+
+This requires connection to a (local recommended) PostgreSQL server with `CREATE DATABASE` privileges. Each lint cycle, `pglint` creates the temporary database, runs each statement in the active file, catches an error if it occurs, and `finally` drops the temporary database. This all happens very quickly in my testing.
+
+### How it works
+
+1. Split the active `.sql` schema file into individual statements, removing extraneous comments and whitespace between statements.
+2. Connect to a configured (local recommended) PostgreSQL server as a user with `CREATE DATABASE` privileges.
+3. `CREATE` a temporary `DATABASE` and connect to that database as the same user.
+4. Loop through the statements from the active file, running each one on the temporary database.
+5. If an error occurs, `catch` the error and add diagnostics to the active file:
+    - Look for the quoted "word" or `position` in the error in the statement, and highlight it as an `error`.
+    - If the specific position or word was found, highlight the entire statement as a `warning`; otherwise, highlight the entire statement as an `error`.
+    - Tag the error with the specific error message from Postgres.
+    - Highlight the remainder of the file as `unnecessary` or "unreachable" code.
+6. Whether or not an error occurred, `DROP` the temporary `DATABASE`.
 
 Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
 
@@ -14,58 +31,34 @@ For example if there is an image subfolder under your extension project workspac
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Access to a PostgreSQL server with `CREATE DATABASE` privileges.
+
+- This extension depends on the npm package `pg`. It is a "Pure JavaScript ... Non-blocking PostgreSQL client for Node.js." For more info, see it on <a target="_blank" href="https://github.com/brianc/node-postgres">GitHub</a>.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+* `pglint.databaseUrl` **(required)**: PostgreSQL Server URL on which to create temporary databases for linting. This extension will display a warning if activated without this setting present.
+
+* `pglint.lintOnSave`: Automatically lint Postgres SQL files on save. Default: `true`
+
+* `pglint.clearOnChange`: Clear diagnostics when the document is changed. Default: `true`
+
+* `pglint.languageIds`: Language IDs of PostgreSQL schemas to lint. Default: `["sql", "postgres"]`
+
+## Extension Commands
+
+This extension contributes the following commands:
+
+* `pglint.lint`: Lint the PostgreSQL schema in the active file.
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+This extension currently requires a complete, self-contained schema file that should run on a clean database to work. I may add `-- include`-like functionality later.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
-
 ### 1.0.0
 
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Initial release.
