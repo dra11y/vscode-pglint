@@ -29,6 +29,10 @@
       {
         "command": "pglint.lint",
         "title": "pglint: Lint PostgreSQL Schema"
+      },
+      {
+        "command": "pglint.terminateTemplateConnections",
+        "title": "pglint: Terminate template database connections (run pg_terminate_backend on @template). WARNING! This will terminate any active queries on the template database."
       }
     ],
     "configuration": {
@@ -46,6 +50,11 @@
           "type": "string",
           "description": "PostgreSQL Server URL on which to create temporary databases for linting."
         },
+        "pglint.tempDatabasePrefix": {
+          "type": "string",
+          "description": "Prefix to use for the temporary database. The current timestamp will be added.",
+          "default": "temp_pglint_"
+        },
         "pglint.lintOnSave": {
           "type": "boolean",
           "default": true,
@@ -55,6 +64,16 @@
           "type": "boolean",
           "default": true,
           "description": "Clear diagnostics when the document is changed."
+        },
+        "pglint.queryStats": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add query stats as a hint on each statement."
+        },
+        "pglint.autoTerminateTemplateConnections": {
+          "type": "boolean",
+          "default": false,
+          "description": "WARNING! Do not use on a production server! Run pg_terminate_backend on datname = template_name each lint cycle. This will kill any active queries on the template database so it doesn't hang your lint."
         }
       }
     }

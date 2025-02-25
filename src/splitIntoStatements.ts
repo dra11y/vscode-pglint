@@ -31,6 +31,14 @@ export interface Statement {
     template?: string
 }
 
+export function quote(s: string) {
+    return s.startsWith('"') ? s : `"${s}"`
+}
+
+export function quotedEqual(a: string, b: string) {
+    return quote(a) === quote(b)
+}
+
 export function clearPositionsCaches() {
     LINE_STARTS_CACHE.clear()
     FILE_LENGTHS_CACHE.clear()
@@ -184,8 +192,6 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
             const startOffset = offset + (commentLine.length - commentText.length)
             commentText = commentText.trimEnd()
             offset += commentLine.length
-            channel.appendLine(`commentLine:${commentLine.length}:${commentLine}`)
-            channel.appendLine(`commentText:${commentText.length}:${commentText}`)
 
             if (
                 !INCLUDE_PREFIX.test(commentText)
@@ -205,7 +211,7 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
                     let includeStatements = await splitIntoStatements(includeUri, text)
                     for (let includeStatement of includeStatements) {
                         includeStatement.includedAt = location
-                        channel.appendLine(`includeStatement: ${JSON.stringify(includeStatement)}`)
+                        // channel.appendLine(`includeStatement: ${JSON.stringify(includeStatement)}`)
                     }
                     statements.push(...includeStatements)
                 } catch (e: any) {
@@ -219,22 +225,6 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
             }
 
             if (TEMPLATE_PREFIX.test(commentText)) {
-                if (statements.length > 0) {
-                    if (statements.some(s => !!s.template)) {
-                        statements.push({
-                            location,
-                            error: 'can only have one template directive!',
-                        })
-                        return statements
-                    }
-
-                    statements.push({
-                        location,
-                        error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
-                    })
-                    return statements
-                }
-
                 const template = directive.trim()
 
                 try {
@@ -245,6 +235,23 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
                         error: e.message ?? 'invalid template directive',
                     })
                     return statements
+                }
+
+                if (statements.length > 0) {
+                    const templateStatements = statements.filter(s => !!s.template)
+                    if (
+                        templateStatements.length > 0
+                        && templateStatements.some(s =>
+                            !quotedEqual(template, s.template!)
+                        )
+                    ) {
+
+                        statements.push({
+                            location,
+                            error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
+                        })
+                        return statements
+                    }
                 }
 
                 statements.push({

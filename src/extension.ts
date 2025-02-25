@@ -1,7 +1,6 @@
 import * as vscode from 'vscode'
-import { setup, teardown, getConfigManager, LINT_COMMAND, EXTENSION_NAME, getChannel } from './config'
-import { lintDocument } from './lintDocument'
-// import { oldLintDocument } from './oldLintDocument'
+import { setup, teardown, getConfigManager, LINT_COMMAND, EXTENSION_NAME, getChannel, TERMINATE_COMMAND } from './config'
+import { lintDocument, terminateTemplateConnections } from './lintDocument'
 
 export function activate(context: vscode.ExtensionContext) {
 	setup()
@@ -19,6 +18,14 @@ export function activate(context: vscode.ExtensionContext) {
 		const document = vscode.window.activeTextEditor?.document
 		if (document && languageIds.includes(document.languageId)) {
 			await lintDocument(document, diagnosticCollection)
+		}
+	}))
+
+	subscriptions.push(vscode.commands.registerCommand(TERMINATE_COMMAND, async () => {
+		const { languageIds } = configManager.get()
+		const document = vscode.window.activeTextEditor?.document
+		if (document && languageIds.includes(document.languageId)) {
+			await terminateTemplateConnections(document, diagnosticCollection)
 		}
 	}))
 

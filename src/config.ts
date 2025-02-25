@@ -3,12 +3,16 @@ import { showMessage } from './showMessage'
 
 export const EXTENSION_NAME: string = 'pglint'
 export const LINT_COMMAND: string = 'pglint.lint'
+export const TERMINATE_COMMAND: string = 'pglint.terminateTemplateConnections'
 
 export interface PgLintConfig {
     databaseUrl: string
     languageIds: string[]
     lintOnSave: boolean
     clearOnChange: boolean
+    queryStats: boolean
+    autoTerminateTemplateConnections: boolean
+    tempDatabasePrefix: string
 }
 
 export class ConfigurationManager {
@@ -17,7 +21,10 @@ export class ConfigurationManager {
     private defaultConfig: Partial<PgLintConfig> = {
         languageIds: ['sql', 'postgres'],
         lintOnSave: true,
-        clearOnChange: true
+        clearOnChange: true,
+        queryStats: true,
+        autoTerminateTemplateConnections: false,
+        tempDatabasePrefix: 'temp_pglint_',
     }
 
     public getSubscription(): vscode.Disposable {
@@ -43,7 +50,10 @@ export class ConfigurationManager {
             databaseUrl: this.config.get('databaseUrl'),
             languageIds: this.config.get('languageIds', this.defaultConfig.languageIds!),
             lintOnSave: this.config.get('lintOnSave', this.defaultConfig.lintOnSave!),
-            clearOnChange: this.config.get('clearOnChange', this.defaultConfig.clearOnChange!)
+            clearOnChange: this.config.get('clearOnChange', this.defaultConfig.clearOnChange!),
+            queryStats: this.config.get('queryStats', this.defaultConfig.queryStats!),
+            autoTerminateTemplateConnections: this.config.get('autoTerminateTemplateConnections', this.defaultConfig.autoTerminateTemplateConnections!),
+            tempDatabasePrefix: this.config.get('tempDatabasePrefix', this.defaultConfig.tempDatabasePrefix!)
         }
     }
 

@@ -20,6 +20,10 @@ export function validateDatabaseName(name: string): void {
         // For quoted names, ensure internal quotes are properly escaped
         const content = name.slice(1, -1)
 
+        if (content.length === 0) {
+            throw new Error('Database name cannot be an empty string')
+        }
+
         // Check for proper escaping of quotes
         for (let i = 0; i < content.length; i++) {
             if (content[i] === '"') {
@@ -33,7 +37,7 @@ export function validateDatabaseName(name: string): void {
         }
     } else {
         // For unquoted names, strictly validate against PostgreSQL's unquoted identifier rules
-        const validUnquotedNamePattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+        const validUnquotedNamePattern = /^[a-zA-Z_][a-zA-Z0-9_]+$/
 
         if (!validUnquotedNamePattern.test(name)) {
             throw new Error('Database name must either be quoted, or start with a letter or underscore and contain only letters, numbers, and underscores')

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 import { EXTENSION_NAME, getChannel, getConfigManager } from './config'
-import { clearPositionsCaches, getLastPositionInFile, getLocationFromLength, getPosition, Location, splitIntoStatements, Statement, TEMPLATE_DIRECTIVE_ERROR_FIRST } from './splitIntoStatements'
+import { clearPositionsCaches, getLastPositionInFile, getLocationFromLength, getPosition, Location, quotedEqual, splitIntoStatements, Statement, TEMPLATE_DIRECTIVE_ERROR_FIRST } from './splitIntoStatements'
 import { Client, ClientConfig } from 'pg'
 import { showMessage } from './showMessage'
 import * as path from 'path'
@@ -11,13 +11,29 @@ function pushDiagnostics(collection: vscode.DiagnosticCollection, uri: vscode.Ur
     collection.set(uri, [...existing, ...diagnostics])
 }
 
+async function terminateBackend(client: Client, database: string) {
+    const channel = getChannel()
+    const sql = `--sql
+        SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = '${database}' AND pid <> pg_backend_pid();
+    `
+    try {
+        channel.appendLine(`Terminating any active connections to ${database} ...`)
+        await client.query(sql)
+        channel.appendLine('Terminate completed')
+    } catch (error: any) {
+        showMessage(vscode.LogLevel.Error, `Failed to terminate backend pid(s) for: ${database}`, error)
+    }
+}
+
 async function cleanupDatabase(config: ClientConfig, database: string) {
     const channel = getChannel()
     const cleanupClient = new Client(config)
     try {
         await cleanupClient.connect()
         channel.appendLine('Running cleanup...')
-        await cleanupClient.query(`DROP DATABASE IF EXISTS ${database};`)
+        await cleanupClient.query(`DROP DATABASE IF EXISTS "${database}";`)
         channel.appendLine('Cleanup completed')
     } catch (error: any) {
         showMessage(vscode.LogLevel.Error, `Failed to clean up temporary database: ${database}, url: ${config.connectionString}`, error)
@@ -47,8 +63,50 @@ function buildUnreachable(location: Location, reason: vscode.Diagnostic): vscode
     return unreachable
 }
 
-export async function lintDocument(document: vscode.TextDocument, collection: vscode.DiagnosticCollection) {
+export async function terminateTemplateConnections(document: vscode.TextDocument, collection: vscode.DiagnosticCollection) {
     const { languageIds, databaseUrl: connectionString } = getConfigManager().get()
+    const channel = getChannel()
+    if (!languageIds.includes(document.languageId)) {
+        return
+    }
+    const sqlText = document.getText()
+    const statements = await splitIntoStatements(document.uri, sqlText)
+    if (statements.length === 0) {
+        return
+    }
+    const { template } = statements[0]
+    if (!template) {
+        return
+    }
+    try {
+        validateDatabaseName(template)
+    } catch (e: any) {
+        showMessage(vscode.LogLevel.Error, `invalid template name: ${template}`, e)
+        return
+    }
+    const postgresConfig: ClientConfig = { connectionString }
+    const client = new Client(postgresConfig)
+
+    try {
+        channel.appendLine('Connecting to database...')
+        await client.connect()
+        await terminateBackend(client, template)
+    } catch (error: any) {
+        showMessage(vscode.LogLevel.Error, `Failed to terminate template backend connections for: ${template}, url: ${connectionString}`, error)
+        return
+    } finally {
+        await client.end()
+    }
+}
+
+export async function lintDocument(document: vscode.TextDocument, collection: vscode.DiagnosticCollection) {
+    const {
+        languageIds,
+        databaseUrl: connectionString,
+        autoTerminateTemplateConnections,
+        tempDatabasePrefix,
+        queryStats,
+    } = getConfigManager().get()
     if (!languageIds.includes(document.languageId)) {
         return
     }
@@ -85,7 +143,16 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
     const postgresConfig: ClientConfig = { connectionString }
     let tempDbConfig: ClientConfig
 
-    const database = `vscode_pglint_${Date.now()}`
+    const databasePrefix = tempDatabasePrefix.replace(/(^|[^"])"([^"]|$)/g, '$1""$2')
+
+    const database = `${databasePrefix}${Date.now()}`
+    const quotedDatabase = `"${database}"`
+    try {
+        validateDatabaseName(quotedDatabase)
+    } catch (e: any) {
+        showMessage(vscode.LogLevel.Error, `Please set pglint.tempDatabasePrefix to a reasonable PostgreSQL database prefix.`, e)
+        return
+    }
 
     const setupClient = new Client(postgresConfig)
 
@@ -93,9 +160,12 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
         channel.appendLine('Connecting to database...')
         await setupClient.connect()
         // channel.appendLine(`postgresConfig: ${JSON.stringify(setupClient)}`)
-        channel.appendLine(`Creating temporary database: ${database}`)
-        let create = `CREATE DATABASE ${database}`
+        channel.appendLine(`Creating temporary database: ${quotedDatabase}`)
+        let create = `CREATE DATABASE ${quotedDatabase}`
         if (template) {
+            if (autoTerminateTemplateConnections) {
+                await terminateBackend(setupClient, template)
+            }
             create += ` TEMPLATE ${template}`
         }
         await setupClient.query(create)
@@ -109,12 +179,17 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
         // channel.appendLine(`tempDbConfig: ${JSON.stringify(tempDbConfig)}`)
     } catch (error: any) {
         if (template) {
+            let { message } = error
+            if (message.includes('is being accessed by other users')) {
+                message += ' (You can set pglint.autoTerminateTemplateConnections = true in settings to auto-terminate. WARNING! This will kill any active queries on the template database.)'
+            }
             const { location: { uri, range } } = statements[0]
-            let diagnostic = new vscode.Diagnostic(range, error.message, vscode.DiagnosticSeverity.Error)
+            let diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error)
             diagnostic.source = EXTENSION_NAME
             pushDiagnostics(collection, uri, [diagnostic])
             return
         }
+
         showMessage(vscode.LogLevel.Error, `Failed to create temporary database: ${database}, url: ${connectionString}`, error)
         return
     } finally {
@@ -148,7 +223,7 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
         const result = await client.query('SELECT current_database();')
         const currentDatabase = result.rows[0].current_database
         if (database !== currentDatabase) {
-            throw new Error(`current_database: ${currentDatabase} does not match expected temporary database: ${database}`)
+            throw new Error(`SELECT current_database() = ${currentDatabase} does NOT match expected temporary database name: ${quotedDatabase}`)
         }
         channel.appendLine(`Connected to database: ${client.database}`)
     } catch (error: any) {
@@ -158,12 +233,13 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
         return
     }
 
+
     const length = statements.length
     try {
         for (var i = 0; i < length; i++) {
             const statement = statements[i]
             if (statement.template) {
-                if (i === 0) {
+                if (i === 0 || (template && quotedEqual(template, statement.template))) {
                     continue
                 }
                 statement.error = TEMPLATE_DIRECTIVE_ERROR_FIRST
@@ -203,7 +279,20 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
             }
 
             try {
-                await client.query(sql)
+                const start = queryStats ? performance.now() : null
+                const { command, rowCount } = await client.query(sql)
+                if (!queryStats) {
+                    continue
+                }
+                const time = (performance.now() - start!).toFixed(3)
+                let message = command
+                if (rowCount !== null) {
+                    message += rowCount === 1 ? ' 1 row' : ` ${rowCount} rows`
+                }
+                message += ` ${time} ms`
+                let infoDiagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Hint)
+                infoDiagnostic.source = EXTENSION_NAME
+                pushDiagnostics(collection, statementUri, [infoDiagnostic])
             } catch (err: any) {
                 if (templateDiagnostic) {
                     templateDiagnostic.severity = vscode.DiagnosticSeverity.Warning
@@ -215,7 +304,6 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
                 }
                 const { ...error } = { ...err, message }
                 const innerOffset = error.position ? parseInt(error.position) - 1 : null
-                const fileName = path.basename(statement.location.uri.path)
 
                 let includedDiagnostic: vscode.Diagnostic | null = null
                 const { includedAt } = statement
