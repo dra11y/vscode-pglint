@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { setup, teardown, getConfigManager, LINT_COMMAND, EXTENSION_NAME, getChannel } from './config'
 import { lintDocument } from './lintDocument'
+// import { oldLintDocument } from './oldLintDocument'
 
 export function activate(context: vscode.ExtensionContext) {
 	setup()

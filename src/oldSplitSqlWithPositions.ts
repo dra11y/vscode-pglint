@@ -43,8 +43,8 @@ async function tryInclude(directive: string, uri: vscode.Uri): Promise<IncludeSq
     }
 }
 
-export async function splitSqlWithPositions(uri: vscode.Uri, sql: string): Promise<Statement[]> {
-    const statements: Statement[] = []
+export async function oldSplitSqlWithPositions(uri: vscode.Uri, sql: string): Promise<Statement[]> {
+    let statements: Statement[] = []
     let currentStart = 0
     let currentText = ''
 
@@ -124,7 +124,7 @@ export async function splitSqlWithPositions(uri: vscode.Uri, sql: string): Promi
                 const directive = commentText.replace(INCLUDE_PREFIX, '')
                 try {
                     const { includeUri, includeSql } = await tryInclude(directive, uri)
-                    statements.push(...await splitSqlWithPositions(includeUri, includeSql))
+                    statements.push(...await oldSplitSqlWithPositions(includeUri, includeSql))
 
                 } catch (e: any) {
                     statements.push({
