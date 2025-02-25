@@ -2,8 +2,11 @@ import * as vscode from 'vscode'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { getChannel } from './config'
+import { validateDatabaseName } from './validateDatabaseName'
 
-const INCLUDE_PREFIX: string = '@include:'
+const TEMPLATE_PREFIX: RegExp = /^@template(:|\s)/
+const INCLUDE_PREFIX: RegExp = /^@include(:|\s)/
+export const TEMPLATE_DIRECTIVE_ERROR_FIRST: string = 'Only one template directive is allowed, and it must come before any other statements.'
 
 let LINE_STARTS_CACHE: Map<vscode.Uri, number[]> = new Map()
 let FILE_LENGTHS_CACHE: Map<vscode.Uri, number> = new Map()
@@ -25,6 +28,7 @@ export interface Statement {
     location: Location
     sql?: string
     error?: string
+    template?: string
 }
 
 export function clearPositionsCaches() {
@@ -61,7 +65,6 @@ export function getLastPositionInFile(uri: vscode.Uri): vscode.Position {
 
 export function getPosition(uri: vscode.Uri, offset: number): vscode.Position {
     const channel = getChannel()
-    // channel.appendLine(`getPosition(...${offset})`)
 
     const starts = LINE_STARTS_CACHE.get(uri)
     if (!starts) {
@@ -69,7 +72,7 @@ export function getPosition(uri: vscode.Uri, offset: number): vscode.Position {
     }
     const filtered = starts.filter(s => s <= offset)
     const line = filtered.length
-    const lineStart = filtered[line - 1]
+    const lineStart = line > 0 ? filtered[line - 1] : 0
     // channel.appendLine(`getPosition line: ${line}, character: ${offset - lineStart}`)
 
     return new vscode.Position(line, offset - lineStart)
@@ -97,16 +100,14 @@ export function getLocationFromLength(uri: vscode.Uri, startOffset: number, leng
 /// `directive` is the string **after** the `INCLUDE_PREFIX` is removed.
 /// throws
 async function tryInclude(directive: string, uri: vscode.Uri): Promise<IncludeFile> {
-    if (!directive) {
+    if (!directive.trim()) {
         throw new Error('include directive must be a non-empty string')
     }
-    // Normalize the directive path to handle any path format issues
-    // This resolves '.', removes redundant separators, etc.
-    const normalizedDirective = path.normalize(directive)
-    // Get the parent directory of the current uri
+    const channel = getChannel()
+    const normalizedDirective = path.normalize(directive.trim())
     const dirPath = path.dirname(uri.fsPath)
-    // Resolve the directive relative to the directory
-    const resolvedPath = path.join(dirPath, normalizedDirective)
+    const resolvedPath = path.resolve(dirPath, normalizedDirective)
+    channel.appendLine(`directive: ${directive}\nnormalizedDirective: ${normalizedDirective}\ndirPath: ${dirPath}\nresolvedPath: ${resolvedPath}`)
     const stat = await fs.stat(resolvedPath)
     if (!stat.isFile()) {
         throw new Error(`include path is not a file: ${resolvedPath}`)
@@ -129,7 +130,6 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
 
     let offset = 0
     let quoteChar: string | null = null
-    let isLineComment = false
     let isBlockComment = false
     let isStatement = false
 
@@ -149,16 +149,6 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
     while (offset < length) {
         const char = sql[offset]
         const nextChar = offset < length - 1 ? sql[offset + 1] : ''
-
-        // Handle line comments
-        if (isLineComment) {
-            isStatement = false
-            if (char === '\n') {
-                isLineComment = false
-            }
-            offset++
-            continue
-        }
 
         // Handle block comments
         if (isBlockComment) {
@@ -187,26 +177,35 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
 
         // Check for line comment start
         if (char === '-' && nextChar === '-') {
-            isLineComment = true
             isStatement = false
             offset += 2
-            const newline = sql.indexOf('\n', offset)
-            if (newline > -1) {
-                while (/[\s\r\n]/.test(sql[offset])) {
-                    offset++
-                }
-                const commentText = sql.substring(offset, newline).trim()
-                if (!commentText.startsWith(INCLUDE_PREFIX)) {
-                    continue
-                }
+            const commentLine = sql.substring(offset).match(/[^\r\n]*(\r?\n|$)/)?.[0] ?? ''
+            let commentText = commentLine.trimStart()
+            const startOffset = offset + (commentLine.length - commentText.length)
+            commentText = commentText.trimEnd()
+            offset += commentLine.length
+            channel.appendLine(`commentLine:${commentLine.length}:${commentLine}`)
+            channel.appendLine(`commentText:${commentText.length}:${commentText}`)
 
-                const directive = commentText.replace(INCLUDE_PREFIX, '')
-                const location = getLocationFromLength(uri, offset, commentText.length)
+            if (
+                !INCLUDE_PREFIX.test(commentText)
+                && !TEMPLATE_PREFIX.test(commentText)
+            ) {
+                continue
+            }
+
+            const location = getLocationFromLength(uri, startOffset, commentText.length)
+            const directive = commentText
+                .replace(INCLUDE_PREFIX, '')
+                .replace(TEMPLATE_PREFIX, '')
+
+            if (INCLUDE_PREFIX.test(commentText)) {
                 try {
                     const { includeUri, text } = await tryInclude(directive, uri)
                     let includeStatements = await splitIntoStatements(includeUri, text)
                     for (let includeStatement of includeStatements) {
                         includeStatement.includedAt = location
+                        channel.appendLine(`includeStatement: ${JSON.stringify(includeStatement)}`)
                     }
                     statements.push(...includeStatements)
                 } catch (e: any) {
@@ -216,6 +215,43 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
                     })
                     return statements
                 }
+                continue
+            }
+
+            if (TEMPLATE_PREFIX.test(commentText)) {
+                if (statements.length > 0) {
+                    if (statements.some(s => !!s.template)) {
+                        statements.push({
+                            location,
+                            error: 'can only have one template directive!',
+                        })
+                        return statements
+                    }
+
+                    statements.push({
+                        location,
+                        error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
+                    })
+                    return statements
+                }
+
+                const template = directive.trim()
+
+                try {
+                    validateDatabaseName(template)
+                } catch (e: any) {
+                    statements.push({
+                        location,
+                        error: e.message ?? 'invalid template directive',
+                    })
+                    return statements
+                }
+
+                statements.push({
+                    location,
+                    template,
+                })
+                continue
             }
             continue
         }

@@ -8,18 +8,20 @@ Lints a PostgreSQL `.sql` schema file (with language ID `sql` or `postgres`) and
 
 This requires connection to a (local recommended) PostgreSQL server with `CREATE DATABASE` privileges. Each lint cycle, `pglint` creates the temporary database, runs each statement in the active file, catches an error if it occurs, and `finally` drops the temporary database. This all happens very quickly in my testing.
 
-### How it works
+### Directives
 
-1. Split the active `.sql` schema file into individual statements, removing extraneous comments and whitespace between statements.
-2. Connect to a configured (local recommended) PostgreSQL server as a user with `CREATE DATABASE` privileges.
-3. `CREATE` a temporary `DATABASE` and connect to that database as the same user.
-4. Loop through the statements from the active file, running each one on the temporary database.
-5. If an error occurs, `catch` the error and add diagnostics to the active file:
-    - Look for the quoted "word" or `position` in the error in the statement, and highlight it as an `error`.
-    - If the specific position or word was found, highlight the entire statement as a `warning`; otherwise, highlight the entire statement as an `error`.
-    - Tag the error with the specific error message from Postgres.
-    - Highlight the remainder of the file as `unnecessary` or "unreachable" code.
-6. Whether or not an error occurred, `DROP` the temporary `DATABASE`.
+```
+-- @include ../myfile.sql
+```
+
+Includes the file `../myfile.sql` as if the statements in the file were directly included in the same file, at the location of the `@include` directive. 
+
+```
+-- @template mydatabase
+```
+
+Uses the given database or template as the starting point with `CREATE DATABASE vscode_pglint_... TEMPLATE mydatabase`. This allows you to use an existing database as a "fixture" or starting point for the SQL commands in the file, so you don't have to `@include` the whole creation schema. Helps if you have a large initial schema that slows down linting.
+
 
 Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
 
@@ -52,6 +54,19 @@ This extension contributes the following settings:
 This extension contributes the following commands:
 
 * `pglint.lint`: Lint the PostgreSQL schema in the active file.
+
+### How it works
+
+1. Split the active `.sql` schema file into individual statements, removing extraneous comments and whitespace between statements.
+2. Connect to a configured (local recommended) PostgreSQL server as a user with `CREATE DATABASE` privileges.
+3. `CREATE` a temporary `DATABASE` and connect to that database as the same user.
+4. Loop through the statements from the active file, running each one on the temporary database.
+5. If an error occurs, `catch` the error and add diagnostics to the active file:
+    - Look for the quoted "word" or `position` in the error in the statement, and highlight it as an `error`.
+    - If the specific position or word was found, highlight the entire statement as a `warning`; otherwise, highlight the entire statement as an `error`.
+    - Tag the error with the specific error message from Postgres.
+    - Highlight the remainder of the file as `unnecessary` or "unreachable" code.
+6. Whether or not an error occurred, `DROP` the temporary `DATABASE`.
 
 ## Known Issues
 
