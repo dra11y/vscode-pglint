@@ -73,7 +73,7 @@
         "pglint.autoTerminateTemplateConnections": {
           "type": "boolean",
           "default": false,
-          "description": "WARNING! Do not use on a production server! Run pg_terminate_backend on datname = template_name each lint cycle. This will kill any active queries on the template database so it doesn't hang your lint."
+          "description": "WARNING! Do not use on a production server! Run pg_terminate_backend on datname = template_name each lint cycle. This will kill any active connections (and queries) on the template database so it doesn't block CREATE DATABASE ... TEMPLATE."
         }
       }
     }

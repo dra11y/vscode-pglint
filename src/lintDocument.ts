@@ -181,7 +181,7 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
         if (template) {
             let { message } = error
             if (message.includes('is being accessed by other users')) {
-                message += ' (You can set pglint.autoTerminateTemplateConnections = true in settings to auto-terminate. WARNING! This will kill any active queries on the template database.)'
+                message += ' (You can set pglint.autoTerminateTemplateConnections = true in settings to auto-terminate. WARNING! This will kill any active connections and queries on the template database.)'
             }
             const { location: { uri, range } } = statements[0]
             let diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error)

@@ -78,7 +78,7 @@ This extension contributes the following settings:
 
 * `pglint.queryStats`: Add query stats as a hint on each statement. Default: `true`. Currently only provides the command, e.g. `CREATE`, `INSERT`, etc., the number of rows affected (if applicable), and the query time in milliseconds (using JavaScript `performance.now()` around the query, as `pg` client does not provide it).
 
-* `pglint.autoTerminateTemplateConnections`: WARNING! Do not use on a production server! Run `pg_terminate_backend` on `datname =` (@template name) each lint cycle. This will kill any active queries on the template database so it doesn't hang your lint. Default: `false`
+* `pglint.autoTerminateTemplateConnections`: WARNING! Do not use on a production server! Run `pg_terminate_backend` on `datname =` (@template name) each lint cycle. This will kill any active connections (and queries) on the template database so it doesn't block `CREATE DATABASE ... TEMPLATE`. Default: `false`
 
 ## Extension Commands
 
