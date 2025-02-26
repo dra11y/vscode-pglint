@@ -16,19 +16,95 @@ interface IncludeFile {
     text: string
 }
 
-export interface Location {
-    uri: vscode.Uri
-    range: vscode.Range
-    startOffset: number
-    length: number
+function positionToString(position: vscode.Position) {
+    const { line, character } = position
+    return `[${line}:${character}]`
 }
 
-export interface Statement {
-    includedAt?: Location
-    location: Location
-    sql?: string
-    error?: string
-    template?: string
+function rangeToString(range: vscode.Range) {
+    const [start, end] = [positionToString(range.start), positionToString(range.end)]
+    return `${start}-${end}`
+}
+
+export class Location extends vscode.Location {
+    public startOffset: number
+    public length: number
+
+    constructor({
+        uri,
+        range,
+        startOffset,
+        length,
+    }: {
+        uri: vscode.Uri,
+        range: vscode.Range,
+        startOffset: number,
+        length: number,
+    }) {
+        super(uri, range)
+        this.startOffset = startOffset
+        this.length = length
+    }
+
+    toJSON() {
+        const uri = this.uri.toString()
+        const range = rangeToString(this.range)
+        const {
+            startOffset,
+            length,
+        } = this
+        return {
+            uri,
+            range,
+            startOffset,
+            length,
+        }
+    }
+}
+
+export class Statement {
+    public includedAt?: Location
+    public location: Location
+    public sql?: string
+    public error?: string
+    public template?: string
+
+    constructor({
+        includedAt,
+        location,
+        sql,
+        error,
+        template,
+    }: {
+        includedAt?: Location,
+        location: Location,
+        sql?: string,
+        error?: string,
+        template?: string,
+    }) {
+        this.includedAt = includedAt
+        this.location = location
+        this.sql = sql
+        this.error = error
+        this.template = template
+    }
+
+    toJSON() {
+        const {
+            includedAt,
+            location,
+            sql,
+            template,
+            error,
+        } = this
+        return {
+            sql,
+            template,
+            error,
+            includedAt,
+            location,
+        }
+    }
 }
 
 export function quote(s: string) {
@@ -93,12 +169,12 @@ export function getLocationFromEndOffset(uri: vscode.Uri, startOffset: number, e
     const end = getPosition(uri, endOffset)
     const range = new vscode.Range(start, end)
     const length = endOffset - startOffset
-    return {
+    return new Location({
         uri,
         range,
         startOffset,
         length,
-    }
+    })
 }
 
 export function getLocationFromLength(uri: vscode.Uri, startOffset: number, length: number): Location {
@@ -144,10 +220,10 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
     const pushStatement = (endOffset: number) => {
         if (currentSql.trim()) {
             const location = getLocationFromEndOffset(uri, currentStart, endOffset)
-            statements.push({
+            statements.push(new Statement({
                 location,
                 sql: currentSql,
-            })
+            }))
         }
         currentStart = endOffset + 1
         currentSql = ''
@@ -204,10 +280,10 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
                         }
                         statements.push(...includeStatements)
                     } catch (e: any) {
-                        statements.push({
+                        statements.push(new Statement({
                             location,
                             error: e.message ?? 'invalid include directive',
-                        })
+                        }))
                         return statements
                     }
                     continue
@@ -219,28 +295,28 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
                     try {
                         validateDatabaseName(template)
                     } catch (e: any) {
-                        statements.push({
+                        statements.push(new Statement({
                             location,
                             error: e.message ?? 'invalid template directive',
-                        })
+                        }))
                         return statements
                     }
 
                     if (statements.length > 0) {
                         const templateStatements = statements.filter(s => !!s.template)
                         if (templateStatements.length > 0 && templateStatements.some(s => !quotedEqual(template, s.template!))) {
-                            statements.push({
+                            statements.push(new Statement({
                                 location,
                                 error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
-                            })
+                            }))
                             return statements
                         }
                     }
 
-                    statements.push({
+                    statements.push(new Statement({
                         location,
                         template,
-                    })
+                    }))
                     continue
                 }
                 continue

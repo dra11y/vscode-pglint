@@ -5,14 +5,20 @@ import { showMessage } from './showMessage'
 import { splitIntoStatements } from './splitIntoStatements'
 import { validateDatabaseName } from './validateDatabaseName'
 
-export async function terminateBackend(client: Client, database: string) {
+export async function terminateBackend(database: string) {
     const channel = getChannel()
+
+    const config = getConfigManager().get()
+
     const sql = `--sql
         SELECT pg_terminate_backend(pid)
             FROM pg_stat_activity
-            WHERE datname = '${database}' AND pid <> pg_backend_pid();
-`
+            WHERE datname = '${database}' AND pid <> pg_backend_pid();`
+
+    const client = new Client(config.databaseUrl)
+
     try {
+        await client.connect()
         channel.appendLine(`Terminating any active connections to ${database} ...`)
         await client.query(sql)
         channel.appendLine('Terminate completed')
@@ -47,8 +53,7 @@ export async function terminateTemplateConnections(document: vscode.TextDocument
 
     try {
         channel.appendLine('Connecting to database...')
-        await client.connect()
-        await terminateBackend(client, template)
+        await terminateBackend(template)
     } catch (error: any) {
         showMessage(vscode.LogLevel.Error, `Failed to terminate template backend connections for: ${template}, url: ${connectionString} `, error)
         return
