@@ -511,26 +511,34 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
 
                 // TODO: improve when postgres returns a quoted quote (""something"")
 
-                const quotedMatch = message.match(/\"([^"]+)\"|column [^"](.+)/)
+                const quotedMatch = message.match(/column "?(?:.+)"?|(?:.*)"([^"]+)"(?!.*")/)
                 const quoted = quotedMatch?.[1] ?? quotedMatch?.[2] ?? null
+                // channel.appendLine(`quoted: ${quoted}`)
 
                 if (quoted || (innerOffset !== null && !isNaN(innerOffset))) {
                     const rest = sql.substring(innerOffset ?? 0)
-                    let length: number
+                    let length = 1
                     if (quoted) {
-                        channel.appendLine(`rest: ${rest.toLowerCase()}`)
                         const quotedOffset = Math.max(
                             rest.indexOf(quoted),
                             rest.toLowerCase().indexOf(quoted)
                         )
+                        channel.appendLine(`innerOffset: ${innerOffset}, quoted: ${quoted}, quotedOffset: ${quotedOffset}, rest: ${rest}`)
+
                         if (quotedOffset > -1) {
-                            innerOffset ??= quotedOffset
+                            if (innerOffset) {
+                                innerOffset += quotedOffset
+                            } else {
+                                innerOffset = quotedOffset
+                            }
                         }
                         length = quoted.length
                     } else {
-                        const innerEnd = rest.match(/\b|\s|\n|$/)!
+                        const innerEnd = rest.match(/[^a-z0-9_"]|$/i)!
+                        channel.appendLine(`innerEnd: ${innerEnd}`)
                         length = innerEnd.index!
                     }
+                    length = Math.max(1, length)
 
                     const innerLocation = getLocationFromLength(statementUri, startOffset + (innerOffset ?? 0), length)
                     let innerDiagnostic = new vscode.Diagnostic(innerLocation.range, messageWithHint, vscode.DiagnosticSeverity.Error)
