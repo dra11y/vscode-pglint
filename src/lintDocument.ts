@@ -9,7 +9,6 @@ import { validateDatabaseName } from './validateDatabaseName'
 const PLPGSQL_CHECK: string = 'plpgsql_check'
 const PLPGSQL_CHECK_FUNCTION_TB: string = 'plpgsql_check_function_tb'
 const DOLLAR_QUOTE: RegExp = /\$[^\s]*\$/
-const THROUGH_DOLLAR_QUOTE: RegExp = /.+?\$[^\s]*\$.*?\n/s
 
 /**
  * Translates line/position information from PostgreSQL's compiled function representation
@@ -75,11 +74,13 @@ function getRangeInFunction(
 }
 
 const CREATE_FUNCTION_REGEX: RegExp = /CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+/is
+const TABLE_REGEX: RegExp = /@table\s+("([^"]+)"|([^\s]+))/is
 
-const GET_FUNCTION_SIGNATURE_SQL: string = `
+const GET_FUNCTION_SIGNATURE_SQL: string = `--sql
 SELECT
-l.lanname AS language,
-    p.oid,
+    l.lanname AS language,
+    -- p.oid,
+    format_type(p.prorettype, NULL) AS return_type,
     format(
         '%I.%I(%s)',
         n.nspname,
@@ -100,7 +101,7 @@ WHERE
 n.nspname NOT IN('pg_catalog', 'information_schema')
 ORDER BY
 p.oid DESC
-LIMIT 1; `
+LIMIT 1;`
 
 interface CheckFunctionRow {
     functionid: string
@@ -142,7 +143,16 @@ async function checkFunction(statement: Statement, client: Client) {
     } catch (e: any) {
         throw new Error('error getting created function')
     }
-    const { function_signature } = result.rows[0]
+    const { function_signature, return_type } = result.rows[0]
+    const isTrigger = return_type === 'trigger'
+    let tableName: string | null = null
+    if (isTrigger) {
+        const tableMatch = sql.match(TABLE_REGEX)
+        if (!tableMatch) {
+            throw new Error(`trigger function missing @table annotation:\n${sql}`)
+        }
+        tableName = tableMatch[2] || tableMatch[3]
+    }
     // let source: string
     // try {
     //     const query = `SELECT pg_get_functiondef(${oid})`
@@ -153,10 +163,11 @@ async function checkFunction(statement: Statement, client: Client) {
     // }
     let checkResult: QueryResult<CheckFunctionRow>
     try {
-        const query = `SELECT * FROM ${PLPGSQL_CHECK_FUNCTION_TB} ('${function_signature}')`
-        checkResult = await client.query<CheckFunctionRow>(query)
+        const query = isTrigger ? `SELECT * FROM ${PLPGSQL_CHECK_FUNCTION_TB}($1, $2)` : `SELECT * FROM ${PLPGSQL_CHECK_FUNCTION_TB}($1)`
+        const values = isTrigger ? [function_signature, tableName] : [function_signature]
+        checkResult = await client.query(query, values)
     } catch (e: any) {
-        throw new Error(`error running check query: ${e.message}, function_signature: ${function_signature}`)
+        throw new Error(`error running check query: ${e.message} ${e.hint}, function_signature: ${function_signature}`)
     }
     const { rows } = checkResult
     for (const row of rows) {

@@ -160,7 +160,6 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
 
         // Handle block comments
         if (isBlockComment) {
-            isStatement = false
             if (char === '*' && nextChar === '/') {
                 isBlockComment = false
                 offset++
@@ -169,155 +168,146 @@ export async function splitIntoStatements(uri: vscode.Uri, sql: string): Promise
             continue
         }
 
-        // Skip whitespace between statements
-        if (!isStatement && /[\s\r\n]/.test(char)) {
-            offset++
-            continue
-        }
-
-        // If not whitespace or inside a comment:
-        // - we've entered a statement;
-        // - store the start position of the statement.
+        // Process between statements
         if (!isStatement) {
+            // Skip whitespace between statements
+            if (/[\s\r\n]/.test(char)) {
+                offset++
+                continue
+            }
+
+            // Check for line comment start (--)
+            if (char === '-' && nextChar === '-') {
+                // Process line comment directive
+                offset += 2
+                const commentLine = sql.substring(offset).match(/[^\r\n]*(\r?\n|$)/)?.[0] ?? ''
+                let commentText = commentLine.trimStart()
+                const startOffset = offset + (commentLine.length - commentText.length)
+                commentText = commentText.trimEnd()
+                offset += commentLine.length
+
+                if (!INCLUDE_PREFIX.test(commentText) && !TEMPLATE_PREFIX.test(commentText)) {
+                    continue
+                }
+
+                const location = getLocationFromLength(uri, startOffset, commentText.length)
+                const directive = commentText
+                    .replace(INCLUDE_PREFIX, '')
+                    .replace(TEMPLATE_PREFIX, '')
+
+                if (INCLUDE_PREFIX.test(commentText)) {
+                    try {
+                        const { includeUri, text } = await tryInclude(directive, uri)
+                        let includeStatements = await splitIntoStatements(includeUri, text)
+                        for (let includeStatement of includeStatements) {
+                            includeStatement.includedAt = location
+                        }
+                        statements.push(...includeStatements)
+                    } catch (e: any) {
+                        statements.push({
+                            location,
+                            error: e.message ?? 'invalid include directive',
+                        })
+                        return statements
+                    }
+                    continue
+                }
+
+                if (TEMPLATE_PREFIX.test(commentText)) {
+                    const template = directive.trim()
+
+                    try {
+                        validateDatabaseName(template)
+                    } catch (e: any) {
+                        statements.push({
+                            location,
+                            error: e.message ?? 'invalid template directive',
+                        })
+                        return statements
+                    }
+
+                    if (statements.length > 0) {
+                        const templateStatements = statements.filter(s => !!s.template)
+                        if (templateStatements.length > 0 && templateStatements.some(s => !quotedEqual(template, s.template!))) {
+                            statements.push({
+                                location,
+                                error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
+                            })
+                            return statements
+                        }
+                    }
+
+                    statements.push({
+                        location,
+                        template,
+                    })
+                    continue
+                }
+                continue
+            }
+
+            // Check for block comment start (/*)
+            if (char === '/' && nextChar === '*') {
+                isBlockComment = true
+                offset += 2
+                continue
+            }
+
+            // Start new statement
             currentStart = offset
             isStatement = true
         }
 
-        // Check for line comment start
-        if (char === '-' && nextChar === '-') {
-            isStatement = false
-            offset += 2
-            const commentLine = sql.substring(offset).match(/[^\r\n]*(\r?\n|$)/)?.[0] ?? ''
-            let commentText = commentLine.trimStart()
-            const startOffset = offset + (commentLine.length - commentText.length)
-            commentText = commentText.trimEnd()
-            offset += commentLine.length
-
-            if (
-                !INCLUDE_PREFIX.test(commentText)
-                && !TEMPLATE_PREFIX.test(commentText)
-            ) {
+        // Handle the statement
+        if (isStatement) {
+            // Check for quotes
+            if (quoteChar) {
+                currentSql += char
+                if (char === quoteChar) {
+                    quoteChar = null
+                }
+                offset++
                 continue
             }
 
-            const location = getLocationFromLength(uri, startOffset, commentText.length)
-            const directive = commentText
-                .replace(INCLUDE_PREFIX, '')
-                .replace(TEMPLATE_PREFIX, '')
+            // Check for dollar quote start
+            if (char === '$') {
+                const slice = sql.slice(offset)
+                const match = slice.match(/^\$([A-Za-z\u0080-\uffff_][A-Za-z\u0080-\uffff0-9_]*)?\$/)
+                if (match) {
+                    const dollarTag = match[0] || '$$'
 
-            if (INCLUDE_PREFIX.test(commentText)) {
-                try {
-                    const { includeUri, text } = await tryInclude(directive, uri)
-                    let includeStatements = await splitIntoStatements(includeUri, text)
-                    for (let includeStatement of includeStatements) {
-                        includeStatement.includedAt = location
-                        // channel.appendLine(`includeStatement: ${JSON.stringify(includeStatement)}`)
-                    }
-                    statements.push(...includeStatements)
-                } catch (e: any) {
-                    statements.push({
-                        location,
-                        error: e.message ?? 'invalid include directive',
-                    })
-                    return statements
-                }
-                continue
-            }
-
-            if (TEMPLATE_PREFIX.test(commentText)) {
-                const template = directive.trim()
-
-                try {
-                    validateDatabaseName(template)
-                } catch (e: any) {
-                    statements.push({
-                        location,
-                        error: e.message ?? 'invalid template directive',
-                    })
-                    return statements
-                }
-
-                if (statements.length > 0) {
-                    const templateStatements = statements.filter(s => !!s.template)
-                    if (
-                        templateStatements.length > 0
-                        && templateStatements.some(s =>
-                            !quotedEqual(template, s.template!)
-                        )
-                    ) {
-
-                        statements.push({
-                            location,
-                            error: TEMPLATE_DIRECTIVE_ERROR_FIRST,
-                        })
-                        return statements
+                    const endTagPos = slice.substring(dollarTag.length).indexOf(dollarTag)
+                    if (endTagPos > -1) {
+                        const quotedText = slice.substring(0, endTagPos + dollarTag.length * 2)
+                        currentSql += quotedText
+                        offset += quotedText.length
+                        continue
                     }
                 }
+            }
 
-                statements.push({
-                    location,
-                    template,
-                })
+            // Check for quote starts
+            if (['"', "'", '`'].includes(char)) {
+                quoteChar = char
+                currentSql += char
+                offset++
                 continue
             }
-            continue
-        }
 
-        // Check for block comment start
-        if (char === '/' && nextChar === '*') {
-            isBlockComment = true
-            isStatement = false
-            offset += 2
-            continue
-        }
-
-        // Handle quotes
-        if (quoteChar) {
-            currentSql += char
-            if (char === quoteChar) {
-                quoteChar = null
+            // Split on semicolons
+            if (char === ';') {
+                currentSql += char
+                pushStatement(offset)
+                isStatement = false
+                offset++
+                continue
             }
-            offset++
-            continue
-        }
 
-        // Check for dollar quote start
-        if (char === '$') {
-            const slice = sql.slice(offset)
-            const match = slice.match(/^\$([A-Za-z\u0080-\uffff_][A-Za-z\u0080-\uffff0-9_]*)?\$/)
-            if (match) {
-                const dollarTag = match[0] || '$$'
-
-                const endTagPos = slice.substring(dollarTag.length).indexOf(dollarTag)
-                if (endTagPos > -1) {
-                    const quotedText = slice.substring(0, endTagPos + dollarTag.length * 2)
-                    currentSql += quotedText
-                    offset += quotedText.length
-                    continue
-                }
-            }
-        }
-
-        // Check for quote starts
-        if (['"', "'", '`'].includes(char)) {
-            quoteChar = char
+            // Regular character
             currentSql += char
             offset++
-            continue
         }
-
-        // Split on semicolons
-        if (char === ';') {
-            currentSql += char
-            pushStatement(offset)
-            isStatement = false
-            offset++
-            continue
-        }
-
-        // Regular character?
-        currentSql += char
-        offset++
     }
 
     // Add final statement
