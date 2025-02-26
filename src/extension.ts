@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { setup, teardown, getConfigManager, LINT_COMMAND, EXTENSION_NAME, getChannel, TERMINATE_COMMAND } from './config'
-import { lintDocument, terminateTemplateConnections } from './lintDocument'
+import { lintDocument } from './lintDocument'
+import { terminateTemplateConnections } from './terminateBackend'
 import { IncludeLinkProvider } from './linkProvider'
 import { IncludeCompletionProvider } from './includeCompletionProvider'
 
