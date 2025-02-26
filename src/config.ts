@@ -13,6 +13,7 @@ export interface PgLintConfig {
     queryStats: boolean
     autoTerminateTemplateConnections: boolean
     tempDatabasePrefix: string
+    usePlPgsqlCheck: boolean
 }
 
 export class ConfigurationManager {
@@ -25,6 +26,7 @@ export class ConfigurationManager {
         queryStats: true,
         autoTerminateTemplateConnections: false,
         tempDatabasePrefix: 'temp_pglint_',
+        usePlPgsqlCheck: true,
     }
 
     public getSubscription(): vscode.Disposable {
@@ -53,7 +55,8 @@ export class ConfigurationManager {
             clearOnChange: this.config.get('clearOnChange', this.defaultConfig.clearOnChange!),
             queryStats: this.config.get('queryStats', this.defaultConfig.queryStats!),
             autoTerminateTemplateConnections: this.config.get('autoTerminateTemplateConnections', this.defaultConfig.autoTerminateTemplateConnections!),
-            tempDatabasePrefix: this.config.get('tempDatabasePrefix', this.defaultConfig.tempDatabasePrefix!)
+            tempDatabasePrefix: this.config.get('tempDatabasePrefix', this.defaultConfig.tempDatabasePrefix!),
+            usePlPgsqlCheck: this.config.get('usePlPgsqlCheck', this.defaultConfig.usePlPgsqlCheck!)
         }
     }
 

@@ -65,6 +65,11 @@
           "default": true,
           "description": "Clear diagnostics when the document is changed."
         },
+        "pglint.usePlPgsqlCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "If the plpgsql_check extension is available, use it to perform additional checks on each CREATE FUNCTION."
+        },
         "pglint.queryStats": {
           "type": "boolean",
           "default": true,

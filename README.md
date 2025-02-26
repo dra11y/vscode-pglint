@@ -74,6 +74,8 @@ This extension contributes the following settings:
 
 * `pglint.clearOnChange`: Clear diagnostics when the document is changed. Default: `true`
 
+* `pglint.usePlPgsqlCheck`: If the `plpgsql_check` extension is available, use it to perform additional checks on each `CREATE FUNCTION`. Default: `true`
+
 * `pglint.languageIds`: Language IDs of PostgreSQL schemas to lint. Default: `["sql", "postgres"]`
 
 * `pglint.queryStats`: Add query stats as a hint on each statement. Default: `true`. Currently only provides the command, e.g. `CREATE`, `INSERT`, etc., the number of rows affected (if applicable), and the query time in milliseconds (using JavaScript `performance.now()` around the query, as `pg` client does not provide it).
