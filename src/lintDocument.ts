@@ -478,12 +478,15 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
                     templateDiagnostic.severity = vscode.DiagnosticSeverity.Warning
                 }
 
-                let { hint, message }: { hint: string, message: string } = err
-                if (hint) {
-                    message += ` Hint: ${hint} `
-                }
+                const { hint, message }: { hint: string, message: string } = err
+                const messageWithHint = hint ? `${message} Hint: ${hint}` : message
+
                 const { ...error } = { ...err, message }
-                const innerOffset = error.position ? parseInt(error.position) - 1 : null
+
+                // const json = JSON.stringify(error, null, 4)
+                // message += json
+
+                let innerOffset = error.position ? parseInt(error.position) - 1 : null
 
                 let includedDiagnostic: vscode.Diagnostic | null = null
                 const { includedAt } = statement
@@ -498,31 +501,39 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
                     includedDiagnostic.relatedInformation = [related]
                 }
 
-                let statementDiagnostic = new vscode.Diagnostic(range, `In this statement: ${message} `, vscode.DiagnosticSeverity.Warning)
+                let statementDiagnostic = new vscode.Diagnostic(range, `In this statement: ${message}}`, vscode.DiagnosticSeverity.Warning)
                 statementDiagnostic.source = EXTENSION_NAME
 
                 const sourceUnreachable = buildUnreachable(statement.location, statementDiagnostic)
                 pushDiagnostics(collection, statementUri, [sourceUnreachable])
 
-                channel.appendLine(`ERROR: ${JSON.stringify(error)} `)
+                // channel.appendLine(`ERROR: ${JSON.stringify(error)} `)
 
                 // TODO: improve when postgres returns a quoted quote (""something"")
-                const quotedMatch = message.match(/column ([^\s]+)|\"([^"]+)\"/)
+
+                const quotedMatch = message.match(/\"([^"]+)\"|column [^"](.+)/)
                 const quoted = quotedMatch?.[1] ?? quotedMatch?.[2] ?? null
 
-                if (innerOffset !== null && !isNaN(innerOffset)) {
-                    const rest = sql.substring(innerOffset)
+                if (quoted || (innerOffset !== null && !isNaN(innerOffset))) {
+                    const rest = sql.substring(innerOffset ?? 0)
                     let length: number
                     if (quoted) {
-                        length = rest.indexOf(quoted) + quoted.length
-                        channel.appendLine(`INNER OFFSET: ${innerOffset}, quoted: ${quoted}, length: ${length} `)
+                        channel.appendLine(`rest: ${rest.toLowerCase()}`)
+                        const quotedOffset = Math.max(
+                            rest.indexOf(quoted),
+                            rest.toLowerCase().indexOf(quoted)
+                        )
+                        if (quotedOffset > -1) {
+                            innerOffset ??= quotedOffset
+                        }
+                        length = quoted.length
                     } else {
-                        const innerEnd = rest.match(/\b|\s|\r|\n$/)
-                        length = innerEnd?.index ?? sql.length - innerOffset
+                        const innerEnd = rest.match(/\b|\s|\n|$/)!
+                        length = innerEnd.index!
                     }
 
-                    const innerLocation = getLocationFromLength(statementUri, startOffset + innerOffset, length)
-                    let innerDiagnostic = new vscode.Diagnostic(innerLocation.range, message, vscode.DiagnosticSeverity.Error)
+                    const innerLocation = getLocationFromLength(statementUri, startOffset + (innerOffset ?? 0), length)
+                    let innerDiagnostic = new vscode.Diagnostic(innerLocation.range, messageWithHint, vscode.DiagnosticSeverity.Error)
                     innerDiagnostic.source = EXTENSION_NAME
 
                     pushDiagnostics(collection, statementUri, [statementDiagnostic, innerDiagnostic])
@@ -545,7 +556,7 @@ export async function lintDocument(document: vscode.TextDocument, collection: vs
                 }
 
                 statementDiagnostic.severity = vscode.DiagnosticSeverity.Error
-                statementDiagnostic.message = message
+                statementDiagnostic.message = messageWithHint
                 pushDiagnostics(collection, statementUri, [statementDiagnostic])
 
                 if (statement.includedAt && includedDiagnostic) {
