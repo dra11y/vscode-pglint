@@ -10,6 +10,7 @@ export interface PgLintConfig {
     languageIds: string[]
     lintOnSave: boolean
     clearOnChange: boolean
+    warnWholeStatement: boolean
     queryStats: boolean
     autoTerminateTemplateConnections: boolean
     tempDatabasePrefix: string
@@ -21,6 +22,7 @@ export class ConfigKey {
     public static readonly databaseUrl: string = 'databaseUrl'
     public static readonly lintOnSave: string = 'lintOnSave'
     public static readonly clearOnChange: string = 'clearOnChange'
+    public static readonly warnWholeStatement: string = 'warnWholeStatement'
     public static readonly queryStats: string = 'queryStats'
     public static readonly autoTerminateTemplateConnections: string = 'autoTerminateTemplateConnections'
     public static readonly tempDatabasePrefix: string = 'tempDatabasePrefix'
@@ -28,18 +30,8 @@ export class ConfigKey {
 }
 
 export class ConfigurationManager {
-
     private config: vscode.WorkspaceConfiguration
     private subscription: vscode.Disposable
-    private defaultConfig: Partial<PgLintConfig> = {
-        languageIds: ['sql', 'postgres'],
-        lintOnSave: true,
-        clearOnChange: true,
-        queryStats: true,
-        autoTerminateTemplateConnections: false,
-        tempDatabasePrefix: 'temp_pglint_',
-        usePlPgsqlCheck: true,
-    }
 
     public getSubscription(): vscode.Disposable {
         return this.subscription
@@ -62,13 +54,14 @@ export class ConfigurationManager {
     private getMaybe(): Partial<PgLintConfig> {
         return {
             databaseUrl: this.config.get(ConfigKey.databaseUrl),
-            languageIds: this.config.get(ConfigKey.languageIds, this.defaultConfig.languageIds!),
-            lintOnSave: this.config.get(ConfigKey.lintOnSave, this.defaultConfig.lintOnSave!),
-            clearOnChange: this.config.get(ConfigKey.clearOnChange, this.defaultConfig.clearOnChange!),
-            queryStats: this.config.get(ConfigKey.queryStats, this.defaultConfig.queryStats!),
-            autoTerminateTemplateConnections: this.config.get(ConfigKey.autoTerminateTemplateConnections, this.defaultConfig.autoTerminateTemplateConnections!),
-            tempDatabasePrefix: this.config.get(ConfigKey.tempDatabasePrefix, this.defaultConfig.tempDatabasePrefix!),
-            usePlPgsqlCheck: this.config.get(ConfigKey.usePlPgsqlCheck, this.defaultConfig.usePlPgsqlCheck!)
+            languageIds: this.config.get(ConfigKey.languageIds),
+            lintOnSave: this.config.get(ConfigKey.lintOnSave),
+            clearOnChange: this.config.get(ConfigKey.clearOnChange),
+            warnWholeStatement: this.config.get(ConfigKey.warnWholeStatement),
+            queryStats: this.config.get(ConfigKey.queryStats),
+            autoTerminateTemplateConnections: this.config.get(ConfigKey.autoTerminateTemplateConnections),
+            tempDatabasePrefix: this.config.get(ConfigKey.tempDatabasePrefix),
+            usePlPgsqlCheck: this.config.get(ConfigKey.usePlPgsqlCheck),
         }
     }
 

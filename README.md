@@ -72,7 +72,9 @@ This extension contributes the following settings:
 
 * `pglint.lintOnSave`: Automatically lint Postgres SQL files on save. Default: `true`
 
-* `pglint.clearOnChange`: Clear diagnostics when the document is changed. Default: `true`
+* `pglint.clearOnChange`: Clear diagnostics when the document is changed. Default: `false`
+
+* `pglint.warnWholeStatement`: When the keyword or substring of the error is found, add a warning diagnostic to the entire statement to make it easier to spot. Default: `true`
 
 * `pglint.usePlPgsqlCheck`: If the `plpgsql_check` extension is available, use it to perform additional checks on each `CREATE FUNCTION`. Default: `true`
 

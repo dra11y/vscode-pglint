@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 import { getLastPositionInFile, getLocationFromLength, getPosition, Location, Statement } from './splitIntoStatements'
-import { EXTENSION_NAME, getChannel } from './config'
+import { EXTENSION_NAME, getChannel, getConfigManager } from './config'
 import { DatabaseError } from 'pg'
 
 function attachMessageToDatabaseError(error: any): any {
@@ -106,6 +106,7 @@ export class StatementError extends GeneralError {
     public handleShouldContinue(collection: vscode.DiagnosticCollection): boolean {
         super.handleShouldContinue(collection)
         const channel = getChannel()
+        const { warnWholeStatement } = getConfigManager().get()
         const error = this.error as DatabaseError
         const { message, position, hint } = error
         const messageWithHint = hint ? `${message}; Hint: ${hint}` : message
@@ -175,7 +176,10 @@ export class StatementError extends GeneralError {
             let innerDiagnostic = new vscode.Diagnostic(innerLocation.range, messageWithHint, vscode.DiagnosticSeverity.Error)
             innerDiagnostic.source = EXTENSION_NAME
 
-            pushDiagnostics(collection, uri, [statementDiagnostic, innerDiagnostic])
+            pushDiagnostics(collection, uri, [innerDiagnostic])
+            if (warnWholeStatement) {
+                pushDiagnostics(collection, uri, [statementDiagnostic])
+            }
 
             if (includedAt && includedDiagnostic) {
                 const related = new vscode.DiagnosticRelatedInformation(

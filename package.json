@@ -62,8 +62,13 @@
         },
         "pglint.clearOnChange": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Clear diagnostics when the document is changed."
+        },
+        "pglint.warnWholeStatement": {
+          "type": "boolean",
+          "default": true,
+          "description": "When the keyword or substring of the error is found, add a warning diagnostic to the entire statement to make it easier to spot."
         },
         "pglint.usePlPgsqlCheck": {
           "type": "boolean",
